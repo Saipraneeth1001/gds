@@ -2,13 +2,22 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	workerpool "gds/worker-pool"
+	"io"
 	"log"
 	"net/http"
 	"os/signal"
 	"syscall"
 	"time"
 )
+
+type ReqBody struct {
+	Num int
+}
+
+var WorkerPool *workerpool.WorkerPool
 
 func main() {
 
@@ -18,6 +27,7 @@ func main() {
 
 	protected := authMiddleware(adminHandler)
 	http.HandleFunc("/start-job", protected)
+	WorkerPool = workerpool.InitWorker(2)
 
 	go func() {
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -37,6 +47,7 @@ func main() {
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		log.Fatalf("server shutdown forcefully: %v", err)
 	}
+	WorkerPool.Shutdown()
 
 	log.Println("Server exited cleanly")
 
@@ -61,5 +72,14 @@ func handleBasicAuth(next http.HandlerFunc, w http.ResponseWriter, r *http.Reque
 }
 
 func adminHandler(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "handled the auth")
+	reqBody, _ := io.ReadAll(r.Body)
+	var req ReqBody
+	err := json.Unmarshal(reqBody, &req)
+	if err != nil {
+		fmt.Fprintf(w, "error decoding object")
+		return
+	}
+
+	WorkerPool.Submit(req.Num)
+	fmt.Fprintf(w, "job accepted: %d", req.Num)
 }
