@@ -1,17 +1,45 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"log"
 	"net/http"
+	"os/signal"
+	"syscall"
+	"time"
 )
 
 func main() {
 
-	port := ":8080"
+	server := &http.Server{
+		Addr: ":8080",
+	}
+
 	protected := authMiddleware(adminHandler)
 	http.HandleFunc("/start-job", protected)
 
-	http.ListenAndServe(port, nil)
+	go func() {
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("server failed: %v", err)
+		}
+	}()
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	<-ctx.Done()
+
+	fmt.Println("Shutting down server gracefully")
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		log.Fatalf("server shutdown forcefully: %v", err)
+	}
+
+	log.Println("Server exited cleanly")
+
 }
 
 func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
